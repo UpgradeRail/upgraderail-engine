@@ -13,7 +13,7 @@
 | SPEC010 | Info | Storage compatibility is not proved statically |
 | SIM001 | Blocking | Policy requires simulation but none ran |
 | AUTH001 | Warning | Recorded authorization differs |
+| AUTH002 | Warning | Authorization XDR could not be normalized; raw evidence is retained |
 | RESOURCE001 | Warning | Configured resource threshold exceeded |
 
 Entries are compared from the Protocol 28 `SCSpecEntry` XDR representation, not Rust source.
-
