@@ -1,0 +1,26 @@
+[package]
+name = "upgraderail-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "upgraderail"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+upgraderail-analyzer = { path = "../upgraderail-analyzer" }
+upgraderail-core = { path = "../upgraderail-core" }
+upgraderail-manifest = { path = "../upgraderail-manifest" }
+upgraderail-report = { path = "../upgraderail-report" }
+upgraderail-simulator = { path = "../upgraderail-simulator" }
+upgraderail-wasm = { path = "../upgraderail-wasm" }
+
+[lints]
+workspace = true
+

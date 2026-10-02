@@ -1,0 +1,17 @@
+[package]
+name = "upgraderail-report"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+upgraderail-analyzer = { path = "../upgraderail-analyzer" }
+upgraderail-core = { path = "../upgraderail-core" }
+upgraderail-manifest = { path = "../upgraderail-manifest" }
+upgraderail-wasm = { path = "../upgraderail-wasm" }
+
+[lints]
+workspace = true
+

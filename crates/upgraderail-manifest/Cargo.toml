@@ -1,0 +1,26 @@
+[package]
+name = "upgraderail-manifest"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+upgraderail-analyzer = { path = "../upgraderail-analyzer" }
+upgraderail-core = { path = "../upgraderail-core" }
+upgraderail-simulator = { path = "../upgraderail-simulator" }
+upgraderail-wasm = { path = "../upgraderail-wasm" }
+
+[dev-dependencies]
+tempfile = "3.23.0"
+
+[lints]
+workspace = true
+

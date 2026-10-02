@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/upgraderail-core",
+  "crates/upgraderail-wasm",
+  "crates/upgraderail-analyzer",
+  "crates/upgraderail-simulator",
+  "crates/upgraderail-manifest",
+  "crates/upgraderail-report",
+  "crates/upgraderail-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.98.1"
+license = "Apache-2.0"
+repository = "https://github.com/UpgradeRail/upgraderail-engine"
+
+[workspace.dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4.6.7", features = ["derive"] }
+hex = "0.4.3"
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.10.9"
+soroban-spec = "=28.0.0"
+stellar-xdr = { version = "=28.0.0", features = ["serde", "base64"] }
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["macros", "process", "rt-multi-thread", "time"] }
+toml = "0.9.12"
+url = "2.5.8"
+wasmparser = "=0.116.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
