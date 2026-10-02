@@ -215,6 +215,13 @@ pub struct ReleaseManifest {
 }
 
 pub fn build(config: &Config) -> Result<ReleaseManifest, ManifestError> {
+    build_with_simulations(config, Vec::new())
+}
+
+pub fn build_with_simulations(
+    config: &Config,
+    mut simulations: Vec<SimulationEvidence>,
+) -> Result<ReleaseManifest, ManifestError> {
     let current = inspect(&config.analysis.current_wasm, ProtocolProfile::Protocol28)
         .map_err(|e| ManifestError::Inspect(e.to_string()))?;
     let candidate = inspect(&config.analysis.candidate_wasm, ProtocolProfile::Protocol28)
@@ -225,7 +232,11 @@ pub fn build(config: &Config) -> Result<ReleaseManifest, ManifestError> {
         ));
     }
     let mut analysis = analyze(&current, &candidate);
-    if config.policy.require_simulation {
+    simulations.sort_by(|left, right| {
+        (&left.scenario, &left.target).cmp(&(&right.scenario, &right.target))
+    });
+    if config.policy.require_simulation && !simulations.iter().any(|simulation| simulation.success)
+    {
         analysis.findings.push(upgraderail_core::Finding::new(
             "SIM001",
             upgraderail_core::Severity::Blocking,
@@ -246,7 +257,7 @@ pub fn build(config: &Config) -> Result<ReleaseManifest, ManifestError> {
         current: (&current).into(),
         candidate: (&candidate).into(),
         analysis,
-        simulations: Vec::new(),
+        simulations,
         limitations: vec![
             "Static WASM analysis cannot prove runtime authorization or storage compatibility."
                 .into(),

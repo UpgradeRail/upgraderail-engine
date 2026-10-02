@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use upgraderail_analyzer::analyze;
 use upgraderail_core::{ProtocolProfile, UpgradeStatus};
-use upgraderail_manifest::{build, hash_file, verify_file, Config};
+use upgraderail_manifest::{build, build_with_simulations, hash_file, verify_file, Config};
 use upgraderail_wasm::inspect;
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -192,7 +192,30 @@ async fn run() -> Result<i32> {
             let config = Config::load(config)?;
             let current = inspect(&config.analysis.current_wasm, ProtocolProfile::Protocol28)?;
             let candidate = inspect(&config.analysis.candidate_wasm, ProtocolProfile::Protocol28)?;
-            let manifest = build(&config)?;
+            let cli = upgraderail_simulator::StellarCli::default();
+            let mut simulations = Vec::new();
+            let mut runtime_findings = Vec::new();
+            for scenario in &config.simulations {
+                let comparison = upgraderail_simulator::run_scenario(
+                    &cli,
+                    scenario,
+                    &config.resource_thresholds,
+                )
+                .await?;
+                runtime_findings.extend(comparison.findings);
+                simulations.push(comparison.current);
+                simulations.push(comparison.candidate);
+            }
+            let mut manifest = build_with_simulations(&config, simulations)?;
+            manifest.analysis.findings.extend(runtime_findings);
+            manifest.analysis.findings.sort_by(|left, right| {
+                (&left.code, &left.title, &left.message).cmp(&(
+                    &right.code,
+                    &right.title,
+                    &right.message,
+                ))
+            });
+            manifest.analysis.status = UpgradeStatus::from_findings(&manifest.analysis.findings);
             render_analysis(&current, &candidate, &manifest.analysis, format)?;
             Ok(exit_for(manifest.analysis.status))
         }
