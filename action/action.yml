@@ -1,0 +1,18 @@
+name: UpgradeRail preflight
+description: Run UpgradeRail checks and write a Markdown step summary
+inputs:
+  config:
+    description: Path to upgraderail.toml
+    required: true
+  report:
+    description: Path for the JSON report
+    required: false
+    default: upgraderail-report.json
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: cargo run --locked -p upgraderail-cli -- check --config "${{ inputs.config }}" --format markdown >> "$GITHUB_STEP_SUMMARY"
+    - shell: bash
+      run: cargo run --locked -p upgraderail-cli -- check --config "${{ inputs.config }}" --format json > "${{ inputs.report }}"
+
