@@ -1,0 +1,17 @@
+schema_version = 1
+
+[project]
+name = "fleet-compatible-upgrade"
+source_revision = "replace-with-current-contracts-revision"
+
+[analysis]
+protocol_profile = 28
+current_wasm = "../../upgraderail-contracts/fixtures/wasm/fleet_v1.wasm"
+candidate_wasm = "../../upgraderail-contracts/fixtures/wasm/fleet_v2_compatible.wasm"
+
+[policy]
+require_simulation = false
+
+[resource_thresholds]
+maximum_instruction_increase_bps = 1000
+
