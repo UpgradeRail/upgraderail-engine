@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use upgraderail_analyzer::analyze;
 use upgraderail_core::{ProtocolProfile, UpgradeStatus};
 use upgraderail_manifest::{build, build_with_simulations, hash_file, verify_file, Config};
+use upgraderail_simulator::SimulationError;
 use upgraderail_wasm::inspect;
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -108,13 +109,39 @@ fn exit_for(status: UpgradeStatus) -> i32 {
     }
 }
 
+fn exit_for_error(error: &anyhow::Error) -> i32 {
+    for cause in error.chain() {
+        if let Some(simulation) = cause.downcast_ref::<SimulationError>() {
+            return match simulation {
+                SimulationError::Url(_) | SimulationError::Malformed(_) => 2,
+                SimulationError::Cli(_)
+                | SimulationError::CliCommand(_)
+                | SimulationError::CliVersion(_) => 3,
+                SimulationError::Rpc(_)
+                | SimulationError::JsonRpc(_)
+                | SimulationError::Timeout => 4,
+            };
+        }
+        if cause
+            .downcast_ref::<upgraderail_wasm::InspectError>()
+            .is_some()
+            || cause
+                .downcast_ref::<upgraderail_manifest::ManifestError>()
+                .is_some()
+        {
+            return 2;
+        }
+    }
+    5
+}
+
 #[tokio::main]
 async fn main() {
     let code = match run().await {
         Ok(code) => code,
         Err(error) => {
             eprintln!("error: {error:#}");
-            2
+            exit_for_error(&error)
         }
     };
     std::process::exit(code);
@@ -231,5 +258,27 @@ async fn run() -> Result<i32> {
                 }
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_classes_follow_typed_failures() {
+        assert_eq!(
+            exit_for_error(&anyhow::Error::new(SimulationError::Timeout)),
+            4
+        );
+        assert_eq!(
+            exit_for_error(&anyhow::Error::new(SimulationError::Cli("missing".into()))),
+            3
+        );
+        assert_eq!(
+            exit_for_error(&anyhow::Error::new(SimulationError::Url("bad".into()))),
+            2
+        );
+        assert_eq!(exit_for(UpgradeStatus::Blocked), 1);
     }
 }
