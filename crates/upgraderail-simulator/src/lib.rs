@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::{process::Stdio, time::Duration};
+use tokio::{process::Command, time::timeout};
 use upgraderail_core::{Finding, Severity};
+use url::Url;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SimulationError {
@@ -119,4 +123,150 @@ pub fn compare_resources(
         }
     }
     findings
+}
+
+pub async fn stellar_cli_version() -> Result<String, SimulationError> {
+    let output = Command::new("stellar")
+        .arg("version")
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| SimulationError::Cli(e.to_string()))?;
+    if !output.status.success() {
+        return Err(SimulationError::Cli(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ));
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let version = text.split_whitespace().nth(1).unwrap_or_default();
+    if !version.starts_with("28.") {
+        return Err(SimulationError::CliVersion(version.into()));
+    }
+    Ok(text)
+}
+
+pub struct RpcClient {
+    endpoint: Url,
+    client: reqwest::Client,
+}
+
+impl RpcClient {
+    pub fn new(endpoint: &str, request_timeout: Duration) -> Result<Self, SimulationError> {
+        let endpoint = Url::parse(endpoint).map_err(|e| SimulationError::Url(e.to_string()))?;
+        if !matches!(endpoint.scheme(), "http" | "https") {
+            return Err(SimulationError::Url(
+                "only http and https are supported".into(),
+            ));
+        }
+        let client = reqwest::Client::builder()
+            .timeout(request_timeout)
+            .build()
+            .map_err(|e| SimulationError::Rpc(e.to_string()))?;
+        Ok(Self { endpoint, client })
+    }
+
+    pub fn sanitized_endpoint(&self) -> String {
+        let mut url = self.endpoint.clone();
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.to_string()
+    }
+
+    async fn call(&self, method: &str, params: Value) -> Result<Value, SimulationError> {
+        let body = json!({"jsonrpc":"2.0","id":"upgraderail","method":method,"params":params});
+        let response = self
+            .client
+            .post(self.endpoint.clone())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    SimulationError::Timeout
+                } else {
+                    SimulationError::Rpc(e.to_string())
+                }
+            })?;
+        let status = response.status();
+        let value: Value = response
+            .json()
+            .await
+            .map_err(|e| SimulationError::Malformed(e.to_string()))?;
+        if !status.is_success() {
+            return Err(SimulationError::Rpc(format!("HTTP {status}")));
+        }
+        if let Some(error) = value.get("error") {
+            return Err(SimulationError::JsonRpc(error.to_string()));
+        }
+        value
+            .get("result")
+            .cloned()
+            .ok_or_else(|| SimulationError::Malformed("missing result".into()))
+    }
+
+    pub async fn get_health(&self) -> Result<Value, SimulationError> {
+        self.call("getHealth", json!({})).await
+    }
+    pub async fn simulate_transaction(
+        &self,
+        transaction_xdr: &str,
+        auth_mode: &str,
+    ) -> Result<Value, SimulationError> {
+        if !matches!(auth_mode, "enforce" | "record" | "record_allow_nonroot") {
+            return Err(SimulationError::Rpc("invalid authorization mode".into()));
+        }
+        self.call(
+            "simulateTransaction",
+            json!({"transaction": transaction_xdr, "authMode": auth_mode}),
+        )
+        .await
+    }
+}
+
+pub async fn run_with_timeout<F, T>(duration: Duration, future: F) -> Result<T, SimulationError>
+where
+    F: std::future::Future<Output = Result<T, SimulationError>>,
+{
+    timeout(duration, future)
+        .await
+        .map_err(|_| SimulationError::Timeout)?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn authorization_difference_is_visible() {
+        assert_eq!(
+            compare_authorization(&["a".into()], &["b".into()])[0].code,
+            "AUTH001"
+        );
+    }
+    #[test]
+    fn integer_resource_thresholds_are_enforced() {
+        let old = ResourceUsage {
+            instructions: Some(100),
+            ..Default::default()
+        };
+        let new = ResourceUsage {
+            instructions: Some(111),
+            ..Default::default()
+        };
+        let limits = ResourceThresholds {
+            maximum_instruction_increase_bps: Some(1000),
+            ..Default::default()
+        };
+        assert_eq!(compare_resources(&old, &new, &limits).len(), 1);
+    }
+    #[test]
+    fn rpc_secrets_are_removed() {
+        let client = RpcClient::new(
+            "https://user:pass@example.test/rpc?token=secret",
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        let output = client.sanitized_endpoint();
+        assert!(!output.contains("pass") && !output.contains("secret"));
+    }
 }
