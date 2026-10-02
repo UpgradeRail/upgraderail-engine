@@ -6,7 +6,7 @@ Static WASM analysis cannot prove all runtime authorization or storage behavior.
 
 ## Supported baseline
 
-- Rust 1.98.1, edition 2021
+- Rust 1.99.0, edition 2021
 - Soroban specification and Stellar XDR 28.0.0
 - Protocol 28 analysis profile
 - Stellar CLI 28.x for dynamic workflows
@@ -36,4 +36,3 @@ See [architecture](docs/architecture.md), [analysis rules](docs/analysis-rules.m
 ## Security and contributing
 
 See [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under Apache-2.0.
-
