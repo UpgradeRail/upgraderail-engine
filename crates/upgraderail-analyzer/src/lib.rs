@@ -68,3 +68,41 @@ fn compare_functions(current: &[FunctionSpec], candidate: &[FunctionSpec], out: 
         out.push(finding);
     }
 }
+
+fn compare_named(
+    current: &[NamedSpec],
+    candidate: &[NamedSpec],
+    removed_code: &str,
+    changed_code: &str,
+    added_code: &str,
+    noun: &str,
+    out: &mut Vec<Finding>,
+) {
+    let old: BTreeMap<_, _> = current.iter().map(|v| (&v.name, v)).collect();
+    let new: BTreeMap<_, _> = candidate.iter().map(|v| (&v.name, v)).collect();
+    for (name, value) in &old {
+        match new.get(name) {
+            None => out.push(Finding::new(
+                removed_code,
+                Severity::Blocking,
+                format!("Public {noun} removed").as_str(),
+                format!("{noun} `{name}` is absent from the candidate contract."),
+            )),
+            Some(other) if value.value != other.value => out.push(Finding::new(
+                changed_code,
+                Severity::Blocking,
+                format!("Public {noun} changed").as_str(),
+                format!("{noun} `{name}` changed incompatibly."),
+            )),
+            _ => {}
+        }
+    }
+    for name in new.keys().filter(|name| !old.contains_key(*name)) {
+        out.push(Finding::new(
+            added_code,
+            Severity::Info,
+            format!("Public {noun} added").as_str(),
+            format!("{noun} `{name}` was added."),
+        ));
+    }
+}
