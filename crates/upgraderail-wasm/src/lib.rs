@@ -125,3 +125,54 @@ fn normalize(entries: Vec<ScSpecEntry>) -> Result<NormalizedSpec, InspectError> 
     events.sort_by(|a, b| a.name.cmp(&b.name));
     Ok((functions, types, errors, events))
 }
+
+pub fn inspect(
+    path: impl AsRef<Path>,
+    profile: ProtocolProfile,
+) -> Result<ArtifactInspection, InspectError> {
+    let path = path.as_ref();
+    let metadata = fs::metadata(path).map_err(|source| InspectError::Read {
+        path: path.into(),
+        source,
+    })?;
+    if metadata.len() > MAX_WASM_BYTES {
+        return Err(InspectError::TooLarge(metadata.len()));
+    }
+    let bytes = fs::read(path).map_err(|source| InspectError::Read {
+        path: path.into(),
+        source,
+    })?;
+    Validator::new()
+        .validate_all(&bytes)
+        .map_err(|e| InspectError::Invalid(e.to_string()))?;
+    let mut custom_sections = Vec::new();
+    for payload in Parser::new(0).parse_all(&bytes) {
+        if let Payload::CustomSection(s) =
+            payload.map_err(|e| InspectError::Invalid(e.to_string()))?
+        {
+            custom_sections.push(s.name().to_owned());
+        }
+    }
+    custom_sections.sort();
+    custom_sections.dedup();
+    let entries = read::from_wasm(&bytes).map_err(|e| match e {
+        read::FromWasmError::NotFound => InspectError::SpecMissing,
+        other => InspectError::Spec(other.to_string()),
+    })?;
+    let (functions, types, errors, events) = normalize(entries)?;
+    Ok(ArtifactInspection {
+        path: path.into(),
+        sha256: hex::encode(Sha256::digest(&bytes)),
+        size_bytes: metadata.len(),
+        valid_wasm: true,
+        soroban_spec_present: true,
+        soroban_metadata_present: custom_sections.iter().any(|s| s == "contractmetav0"),
+        functions,
+        types,
+        errors,
+        events,
+        custom_sections,
+        protocol_profile: profile,
+        tool_version: env!("CARGO_PKG_VERSION").into(),
+    })
+}
