@@ -135,6 +135,53 @@ pub struct SimulationEvidence {
     pub success: bool,
 }
 
+fn parse_u64(value: Option<&Value>) -> Option<u64> {
+    value.and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
+}
+
+pub fn decode_simulation_evidence(
+    scenario: &str,
+    network: &str,
+    target: &str,
+    response: &Value,
+) -> Result<SimulationEvidence, SimulationError> {
+    let result = response
+        .get("results")
+        .and_then(Value::as_array)
+        .and_then(|results| results.first())
+        .ok_or_else(|| {
+            SimulationError::Malformed("simulateTransaction response has no results".into())
+        })?;
+    let authorization_xdr = result
+        .get("auth")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    let diagnostic_failure = result.get("error").map(Value::to_string);
+    let cost = response.get("cost");
+    Ok(SimulationEvidence {
+        scenario: scenario.into(),
+        network: network.into(),
+        target: target.into(),
+        latest_ledger: parse_u64(response.get("latestLedger")),
+        return_value_xdr: result.get("xdr").and_then(Value::as_str).map(str::to_owned),
+        authorization_xdr,
+        resources: ResourceUsage {
+            instructions: parse_u64(cost.and_then(|cost| cost.get("cpuInsns"))),
+            read_bytes: parse_u64(cost.and_then(|cost| cost.get("readBytes"))),
+            write_bytes: parse_u64(cost.and_then(|cost| cost.get("writeBytes"))),
+            resource_fee: parse_u64(response.get("minResourceFee")),
+        },
+        success: diagnostic_failure.is_none(),
+        diagnostic_failure,
+    })
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ResourceThresholds {
     pub maximum_instruction_increase_bps: Option<u64>,
@@ -399,6 +446,31 @@ mod tests {
                 "7",
             ]
         );
+    }
+
+    #[test]
+    fn rpc_simulation_evidence_decodes_supported_fields() {
+        let response = json!({
+            "latestLedger": 42,
+            "minResourceFee": "17",
+            "cost": { "cpuInsns": "100", "readBytes": "3", "writeBytes": "4" },
+            "results": [{ "xdr": "AAAA", "auth": ["AUTH"] }]
+        });
+        let evidence =
+            decode_simulation_evidence("scenario", "testnet", "C123", &response).unwrap();
+        assert_eq!(evidence.latest_ledger, Some(42));
+        assert_eq!(evidence.return_value_xdr.as_deref(), Some("AAAA"));
+        assert_eq!(evidence.authorization_xdr, ["AUTH"]);
+        assert_eq!(evidence.resources.resource_fee, Some(17));
+        assert!(evidence.success);
+    }
+
+    #[test]
+    fn rpc_simulation_evidence_rejects_missing_results() {
+        assert!(matches!(
+            decode_simulation_evidence("scenario", "testnet", "C123", &json!({})),
+            Err(SimulationError::Malformed(_))
+        ));
     }
 
     #[tokio::test]
