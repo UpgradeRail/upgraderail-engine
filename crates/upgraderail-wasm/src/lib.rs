@@ -1,13 +1,13 @@
+mod hash;
+mod inspect;
+mod metadata;
+mod spec;
+mod validation;
+
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use soroban_spec::read;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
-use stellar_xdr::ScSpecEntry;
-use upgraderail_core::ProtocolProfile;
-use wasmparser::{Parser, Payload, Validator};
+use std::path::PathBuf;
+
+pub use inspect::inspect;
 
 pub const MAX_WASM_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -54,139 +54,6 @@ pub struct ArtifactInspection {
     pub errors: Vec<NamedSpec>,
     pub events: Vec<NamedSpec>,
     pub custom_sections: Vec<String>,
-    pub protocol_profile: ProtocolProfile,
+    pub protocol_profile: upgraderail_core::ProtocolProfile,
     pub tool_version: String,
-}
-
-type NormalizedSpec = (
-    Vec<FunctionSpec>,
-    Vec<NamedSpec>,
-    Vec<NamedSpec>,
-    Vec<NamedSpec>,
-);
-
-fn xdr_name<T: Serialize>(value: &T) -> String {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|v| v.get("name").cloned())
-        .and_then(|v| v.as_str().map(str::to_owned))
-        .unwrap_or_else(|| "<unnamed>".into())
-}
-
-fn normalize(entries: Vec<ScSpecEntry>) -> Result<NormalizedSpec, InspectError> {
-    let mut functions = Vec::new();
-    let mut types = Vec::new();
-    let mut errors = Vec::new();
-    let mut events = Vec::new();
-    for entry in entries {
-        match entry {
-            ScSpecEntry::FunctionV0(v) => {
-                let value =
-                    serde_json::to_value(&v).map_err(|e| InspectError::Spec(e.to_string()))?;
-                functions.push(FunctionSpec {
-                    name: xdr_name(&v),
-                    inputs: value
-                        .get("inputs")
-                        .and_then(|v| v.as_array())
-                        .cloned()
-                        .unwrap_or_default(),
-                    outputs: value
-                        .get("outputs")
-                        .and_then(|v| v.as_array())
-                        .cloned()
-                        .unwrap_or_default(),
-                });
-            }
-            ScSpecEntry::UdtErrorEnumV0(v) => errors.push(NamedSpec {
-                name: xdr_name(&v),
-                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
-            }),
-            ScSpecEntry::EventV0(v) => events.push(NamedSpec {
-                name: xdr_name(&v),
-                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
-            }),
-            ScSpecEntry::UdtStructV0(v) => types.push(NamedSpec {
-                name: xdr_name(&v),
-                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
-            }),
-            ScSpecEntry::UdtUnionV0(v) => types.push(NamedSpec {
-                name: xdr_name(&v),
-                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
-            }),
-            ScSpecEntry::UdtEnumV0(v) => types.push(NamedSpec {
-                name: xdr_name(&v),
-                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
-            }),
-        }
-    }
-    functions.sort_by(|a, b| a.name.cmp(&b.name));
-    types.sort_by(|a, b| a.name.cmp(&b.name));
-    errors.sort_by(|a, b| a.name.cmp(&b.name));
-    events.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok((functions, types, errors, events))
-}
-
-pub fn inspect(
-    path: impl AsRef<Path>,
-    profile: ProtocolProfile,
-) -> Result<ArtifactInspection, InspectError> {
-    let path = path.as_ref();
-    let metadata = fs::metadata(path).map_err(|source| InspectError::Read {
-        path: path.into(),
-        source,
-    })?;
-    if metadata.len() > MAX_WASM_BYTES {
-        return Err(InspectError::TooLarge(metadata.len()));
-    }
-    let bytes = fs::read(path).map_err(|source| InspectError::Read {
-        path: path.into(),
-        source,
-    })?;
-    Validator::new()
-        .validate_all(&bytes)
-        .map_err(|e| InspectError::Invalid(e.to_string()))?;
-    let mut custom_sections = Vec::new();
-    for payload in Parser::new(0).parse_all(&bytes) {
-        if let Payload::CustomSection(s) =
-            payload.map_err(|e| InspectError::Invalid(e.to_string()))?
-        {
-            custom_sections.push(s.name().to_owned());
-        }
-    }
-    custom_sections.sort();
-    custom_sections.dedup();
-    let entries = read::from_wasm(&bytes).map_err(|e| match e {
-        read::FromWasmError::NotFound => InspectError::SpecMissing,
-        other => InspectError::Spec(other.to_string()),
-    })?;
-    let (functions, types, errors, events) = normalize(entries)?;
-    Ok(ArtifactInspection {
-        path: path.into(),
-        sha256: hex::encode(Sha256::digest(&bytes)),
-        size_bytes: metadata.len(),
-        valid_wasm: true,
-        soroban_spec_present: true,
-        soroban_metadata_present: custom_sections.iter().any(|s| s == "contractmetav0"),
-        functions,
-        types,
-        errors,
-        events,
-        custom_sections,
-        protocol_profile: profile,
-        tool_version: env!("CARGO_PKG_VERSION").into(),
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn malformed_wasm_is_a_clean_error() {
-        let file = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(file.path(), b"not wasm").unwrap();
-        assert!(matches!(
-            inspect(file.path(), ProtocolProfile::Protocol28),
-            Err(InspectError::Invalid(_))
-        ));
-    }
 }
