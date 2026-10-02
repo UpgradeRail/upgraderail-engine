@@ -18,13 +18,13 @@ pub fn compare(
             None => out.push(Finding::new(
                 removed_code,
                 Severity::Blocking,
-                format!("Public {noun} removed"),
+                &format!("Public {noun} removed"),
                 format!("{noun} `{name}` is absent from the candidate contract."),
             )),
             Some(other) if value.value != other.value => out.push(Finding::new(
                 changed_code,
                 Severity::Blocking,
-                format!("Public {noun} changed"),
+                &format!("Public {noun} changed"),
                 format!("{noun} `{name}` changed incompatibly."),
             )),
             _ => {}
@@ -34,7 +34,7 @@ pub fn compare(
         out.push(Finding::new(
             added_code,
             Severity::Info,
-            format!("Public {noun} added"),
+            &format!("Public {noun} added"),
             format!("{noun} `{name}` was added."),
         ));
     }
