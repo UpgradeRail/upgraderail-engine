@@ -176,3 +176,17 @@ pub fn inspect(
         tool_version: env!("CARGO_PKG_VERSION").into(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn malformed_wasm_is_a_clean_error() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), b"not wasm").unwrap();
+        assert!(matches!(
+            inspect(file.path(), ProtocolProfile::Protocol28),
+            Err(InspectError::Invalid(_))
+        ));
+    }
+}
