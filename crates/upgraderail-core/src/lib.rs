@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -33,5 +34,40 @@ impl Finding {
             message: message.into(),
             evidence: Vec::new(),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum UpgradeStatus {
+    Blocked,
+    ReadyWithWarnings,
+    Ready,
+}
+
+impl UpgradeStatus {
+    #[must_use]
+    pub fn from_findings(findings: &[Finding]) -> Self {
+        if findings.iter().any(|f| f.severity == Severity::Blocking) {
+            Self::Blocked
+        } else if findings.iter().any(|f| f.severity == Severity::Warning) {
+            Self::ReadyWithWarnings
+        } else {
+            Self::Ready
+        }
+    }
+}
+
+impl fmt::Display for UpgradeStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Blocked => "BLOCKED",
+                Self::ReadyWithWarnings => "READY_WITH_WARNINGS",
+                Self::Ready => "READY",
+            }
+        )
     }
 }
