@@ -50,6 +50,8 @@ enum Command {
     Check {
         #[arg(long, default_value = "upgraderail.toml")]
         config: PathBuf,
+        #[arg(long)]
+        skip_simulations: bool,
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
     },
@@ -205,23 +207,29 @@ async fn run() -> Result<i32> {
             }
             Ok(0)
         }
-        Command::Check { config, format } => {
+        Command::Check {
+            config,
+            skip_simulations,
+            format,
+        } => {
             let config = Config::load(config)?;
             let current = inspect(&config.analysis.current_wasm, ProtocolProfile::Protocol28)?;
             let candidate = inspect(&config.analysis.candidate_wasm, ProtocolProfile::Protocol28)?;
             let cli = upgraderail_simulator::StellarCli::default();
             let mut simulations = Vec::new();
             let mut runtime_findings = Vec::new();
-            for scenario in &config.simulations {
-                let comparison = upgraderail_simulator::run_scenario(
-                    &cli,
-                    scenario,
-                    &config.resource_thresholds,
-                )
-                .await?;
-                runtime_findings.extend(comparison.findings);
-                simulations.push(comparison.current);
-                simulations.push(comparison.candidate);
+            if !skip_simulations {
+                for scenario in &config.simulations {
+                    let comparison = upgraderail_simulator::run_scenario(
+                        &cli,
+                        scenario,
+                        &config.resource_thresholds,
+                    )
+                    .await?;
+                    runtime_findings.extend(comparison.findings);
+                    simulations.push(comparison.current);
+                    simulations.push(comparison.candidate);
+                }
             }
             let mut manifest = build_with_simulations(&config, simulations)?;
             manifest.analysis.findings.extend(runtime_findings);

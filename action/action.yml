@@ -8,11 +8,17 @@ inputs:
     description: Path for the JSON report
     required: false
     default: upgraderail-report.json
+  run-simulations:
+    description: Run configured runtime scenarios. Enable only in trusted workflows with the required credentials.
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
     - shell: bash
-      run: cargo run --locked -p upgraderail-cli -- check --config "${{ inputs.config }}" --format markdown >> "$GITHUB_STEP_SUMMARY"
+      run: cargo run --locked -p upgraderail-cli -- check --config "${{ inputs.config }}" --skip-simulations --format markdown >> "$GITHUB_STEP_SUMMARY"
     - shell: bash
-      run: cargo run --locked -p upgraderail-cli -- check --config "${{ inputs.config }}" --format json > "${{ inputs.report }}"
-
+      run: cargo run --locked -p upgraderail-cli -- check --config "${{ inputs.config }}" --skip-simulations --format json > "${{ inputs.report }}"
+    - if: ${{ inputs.run-simulations == 'true' }}
+      shell: bash
+      run: cargo run --locked -p upgraderail-cli -- check --config "${{ inputs.config }}" --format markdown >> "$GITHUB_STEP_SUMMARY"
