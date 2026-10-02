@@ -64,3 +64,42 @@ fn evidence(kind: &str, reference: &str) -> Vec<Evidence> {
         reference: reference.into(),
     }]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn function(name: &str, input: &str, output: &str) -> FunctionSpec {
+        FunctionSpec {
+            name: name.into(),
+            inputs: vec![serde_json::json!(input)],
+            outputs: vec![serde_json::json!(output)],
+        }
+    }
+
+    #[test]
+    fn detects_added_removed_and_changed_functions() {
+        let mut findings = Vec::new();
+        compare(
+            &[
+                function("old", "u32", "u32"),
+                function("changed", "u32", "u32"),
+            ],
+            &[
+                function("added", "u32", "u32"),
+                function("changed", "i32", "i32"),
+            ],
+            &mut findings,
+        );
+        let codes = findings
+            .iter()
+            .map(|finding| finding.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"FUNC001")
+                && codes.contains(&"FUNC002")
+                && codes.contains(&"FUNC003")
+                && codes.contains(&"FUNC004")
+        );
+    }
+}

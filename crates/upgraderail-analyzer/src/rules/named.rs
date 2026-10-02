@@ -39,3 +39,49 @@ pub fn compare(
         ));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_removed_changed_and_added_named_definitions() {
+        let current = vec![
+            NamedSpec {
+                name: "old".into(),
+                value: serde_json::json!(1),
+            },
+            NamedSpec {
+                name: "changed".into(),
+                value: serde_json::json!(1),
+            },
+        ];
+        let candidate = vec![
+            NamedSpec {
+                name: "changed".into(),
+                value: serde_json::json!(2),
+            },
+            NamedSpec {
+                name: "added".into(),
+                value: serde_json::json!(3),
+            },
+        ];
+        let mut findings = Vec::new();
+        compare(
+            &current,
+            &candidate,
+            "TYPE001",
+            "TYPE002",
+            "TYPE003",
+            "type",
+            &mut findings,
+        );
+        let codes = findings
+            .iter()
+            .map(|finding| finding.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"TYPE001") && codes.contains(&"TYPE002") && codes.contains(&"TYPE003")
+        );
+    }
+}
