@@ -5,6 +5,10 @@ use tokio::{process::Command, time::timeout};
 use upgraderail_core::{Finding, Severity};
 use url::Url;
 
+mod scenario;
+
+pub use scenario::{AuthorizationMode, ScenarioExpectations, ScenarioNetwork, SimulationScenario};
+
 #[derive(Debug, thiserror::Error)]
 pub enum SimulationError {
     #[error("Stellar CLI is unavailable: {0}")]
