@@ -397,6 +397,64 @@ mod tests {
         };
         assert_eq!(compare_resources(&old, &new, &limits).len(), 1);
     }
+
+    #[test]
+    fn resource_thresholds_handle_boundaries_and_absent_values() {
+        let limits = ResourceThresholds {
+            maximum_instruction_increase_bps: Some(1_000),
+            ..Default::default()
+        };
+        let current = ResourceUsage {
+            instructions: Some(100),
+            ..Default::default()
+        };
+        assert!(compare_resources(
+            &current,
+            &ResourceUsage {
+                instructions: Some(110),
+                ..Default::default()
+            },
+            &limits
+        )
+        .is_empty());
+        assert_eq!(
+            compare_resources(
+                &current,
+                &ResourceUsage {
+                    instructions: Some(111),
+                    ..Default::default()
+                },
+                &limits
+            )
+            .len(),
+            1
+        );
+        assert!(compare_resources(
+            &ResourceUsage {
+                instructions: Some(0),
+                ..Default::default()
+            },
+            &ResourceUsage {
+                instructions: Some(u64::MAX),
+                ..Default::default()
+            },
+            &limits
+        )
+        .is_empty());
+        assert!(compare_resources(&current, &ResourceUsage::default(), &limits).is_empty());
+        assert!(
+            compare_resources(
+                &current,
+                &ResourceUsage {
+                    instructions: Some(u64::MAX),
+                    ..Default::default()
+                },
+                &limits
+            )
+            .len()
+                == 1
+        );
+    }
     #[test]
     fn rpc_secrets_are_removed() {
         let client = RpcClient::new(
