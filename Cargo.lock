@@ -1855,6 +1855,7 @@ dependencies = [
  "upgraderail-analyzer",
  "upgraderail-core",
  "upgraderail-manifest",
+ "upgraderail-simulator",
  "upgraderail-wasm",
 ]
 

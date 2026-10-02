@@ -10,8 +10,8 @@ serde_json.workspace = true
 upgraderail-analyzer = { path = "../upgraderail-analyzer" }
 upgraderail-core = { path = "../upgraderail-core" }
 upgraderail-manifest = { path = "../upgraderail-manifest" }
+upgraderail-simulator = { path = "../upgraderail-simulator" }
 upgraderail-wasm = { path = "../upgraderail-wasm" }
 
 [lints]
 workspace = true
-

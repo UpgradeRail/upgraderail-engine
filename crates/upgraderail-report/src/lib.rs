@@ -1,6 +1,7 @@
 use upgraderail_analyzer::AnalysisResult;
 use upgraderail_core::Severity;
 use upgraderail_manifest::ReleaseManifest;
+use upgraderail_simulator::ScenarioComparison;
 use upgraderail_wasm::ArtifactInspection;
 
 pub fn inspection_text(value: &ArtifactInspection) -> String {
@@ -55,6 +56,63 @@ pub fn analysis_markdown(result: &AnalysisResult) -> String {
 
 pub fn manifest_markdown(manifest: &ReleaseManifest) -> String {
     analysis_markdown(&manifest.analysis)
+}
+
+pub fn simulation_text(comparisons: &[ScenarioComparison]) -> String {
+    if comparisons.is_empty() {
+        return "Runtime simulation: NOT CONFIGURED\nAuthorization comparison: NOT TESTED\n".into();
+    }
+    let mut text = "Runtime simulation\n".to_owned();
+    for comparison in comparisons {
+        text.push_str(&format!(
+            "\nScenario: {}\n  Current: {}\n  Candidate: {}\n  Authorization: {}\n",
+            comparison.current.scenario,
+            simulation_state(&comparison.current),
+            simulation_state(&comparison.candidate),
+            if comparison.current.authorization == comparison.candidate.authorization {
+                "MATCHED"
+            } else {
+                "CHANGED"
+            }
+        ));
+        for finding in &comparison.findings {
+            text.push_str(&format!(
+                "  {:?} {}: {}\n",
+                finding.severity, finding.code, finding.message
+            ));
+        }
+    }
+    text
+}
+
+pub fn simulation_markdown(comparisons: &[ScenarioComparison]) -> String {
+    if comparisons.is_empty() {
+        return "## Runtime simulation\n\n- Status: NOT CONFIGURED\n- Authorization: NOT TESTED\n"
+            .into();
+    }
+    let mut text = "## Runtime simulation\n\n| Scenario | Current | Candidate | Authorization |\n|---|---|---|---|\n".to_owned();
+    for comparison in comparisons {
+        text.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            comparison.current.scenario,
+            simulation_state(&comparison.current),
+            simulation_state(&comparison.candidate),
+            if comparison.current.authorization == comparison.candidate.authorization {
+                "MATCHED"
+            } else {
+                "CHANGED"
+            }
+        ));
+    }
+    text
+}
+
+fn simulation_state(evidence: &upgraderail_simulator::SimulationEvidence) -> &'static str {
+    if evidence.success {
+        "SUCCESS"
+    } else {
+        "SIMULATION FAILED"
+    }
 }
 
 #[cfg(test)]

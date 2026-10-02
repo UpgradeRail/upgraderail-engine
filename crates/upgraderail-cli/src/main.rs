@@ -168,22 +168,12 @@ async fn run() -> Result<i32> {
             }
             match format {
                 Format::Json => println!("{}", serde_json::to_string_pretty(&comparisons)?),
-                Format::Text | Format::Markdown => {
-                    println!("Stellar CLI: {version}\nRuntime simulation:");
-                    for comparison in &comparisons {
-                        println!(
-                            "  {}: current={} candidate={}",
-                            comparison.current.scenario,
-                            comparison.current.success,
-                            comparison.candidate.success
-                        );
-                        for finding in &comparison.findings {
-                            println!(
-                                "  {:?} {}: {}",
-                                finding.severity, finding.code, finding.message
-                            );
-                        }
-                    }
+                Format::Text => print!(
+                    "Stellar CLI: {version}\n{}",
+                    upgraderail_report::simulation_text(&comparisons)
+                ),
+                Format::Markdown => {
+                    print!("{}", upgraderail_report::simulation_markdown(&comparisons))
                 }
             }
             Ok(0)
