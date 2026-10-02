@@ -43,6 +43,8 @@ enum Command {
     Simulate {
         #[arg(long, default_value = "upgraderail.toml")]
         config: PathBuf,
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
     },
     Check {
         #[arg(long, default_value = "upgraderail.toml")]
@@ -145,10 +147,45 @@ async fn run() -> Result<i32> {
             render_analysis(&current, &candidate, &result, format)?;
             Ok(exit_for(result.status))
         }
-        Command::Simulate { config } => {
-            let _ = Config::load(config)?;
+        Command::Simulate { config, format } => {
+            let config = Config::load(config)?;
             let version = upgraderail_simulator::stellar_cli_version().await?;
-            println!("Stellar CLI: {version}\nRuntime simulation: NOT CONFIGURED\nAuthorization comparison: NOT TESTED");
+            if config.simulations.is_empty() {
+                println!("Stellar CLI: {version}\nRuntime simulation: NOT CONFIGURED\nAuthorization comparison: NOT TESTED");
+                return Ok(0);
+            }
+            let cli = upgraderail_simulator::StellarCli::default();
+            let mut comparisons = Vec::new();
+            for scenario in &config.simulations {
+                comparisons.push(
+                    upgraderail_simulator::run_scenario(
+                        &cli,
+                        scenario,
+                        &config.resource_thresholds,
+                    )
+                    .await?,
+                );
+            }
+            match format {
+                Format::Json => println!("{}", serde_json::to_string_pretty(&comparisons)?),
+                Format::Text | Format::Markdown => {
+                    println!("Stellar CLI: {version}\nRuntime simulation:");
+                    for comparison in &comparisons {
+                        println!(
+                            "  {}: current={} candidate={}",
+                            comparison.current.scenario,
+                            comparison.current.success,
+                            comparison.candidate.success
+                        );
+                        for finding in &comparison.findings {
+                            println!(
+                                "  {:?} {}: {}",
+                                finding.severity, finding.code, finding.message
+                            );
+                        }
+                    }
+                }
+            }
             Ok(0)
         }
         Command::Check { config, format } => {
