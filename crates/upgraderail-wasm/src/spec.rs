@@ -58,9 +58,9 @@ fn normalize(entries: Vec<ScSpecEntry>) -> Result<NormalizedSpec, InspectError> 
             }
             ScSpecEntry::UdtErrorEnumV0(value) => errors.push(named(value)?),
             ScSpecEntry::EventV0(value) => events.push(named(value)?),
-            ScSpecEntry::UdtStructV0(value)
-            | ScSpecEntry::UdtUnionV0(value)
-            | ScSpecEntry::UdtEnumV0(value) => types.push(named(value)?),
+            ScSpecEntry::UdtStructV0(value) => types.push(named(value)?),
+            ScSpecEntry::UdtUnionV0(value) => types.push(named(value)?),
+            ScSpecEntry::UdtEnumV0(value) => types.push(named(value)?),
         }
     }
     functions.sort_by(|left, right| left.name.cmp(&right.name));
