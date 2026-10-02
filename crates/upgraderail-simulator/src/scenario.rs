@@ -31,6 +31,7 @@ impl AuthorizationMode {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScenarioNetwork {
     pub name: String,
     pub rpc_url: String,
@@ -38,6 +39,7 @@ pub struct ScenarioNetwork {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScenarioExpectations {
     #[serde(default)]
     pub return_match: bool,
@@ -46,6 +48,7 @@ pub struct ScenarioExpectations {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SimulationScenario {
     pub name: String,
     pub network: ScenarioNetwork,

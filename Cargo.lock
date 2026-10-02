@@ -1844,6 +1844,7 @@ dependencies = [
  "upgraderail-core",
  "upgraderail-simulator",
  "upgraderail-wasm",
+ "url",
 ]
 
 [[package]]

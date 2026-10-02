@@ -9,6 +9,7 @@ use upgraderail_analyzer::{analyze, AnalysisResult};
 use upgraderail_core::{ProtocolProfile, UpgradeStatus};
 use upgraderail_simulator::{ResourceThresholds, SimulationEvidence};
 use upgraderail_wasm::{inspect, ArtifactInspection};
+use url::Url;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
@@ -40,6 +41,8 @@ pub struct Config {
     pub policy: PolicyConfig,
     #[serde(default)]
     pub resource_thresholds: ResourceThresholds,
+    #[serde(default, rename = "simulation")]
+    pub simulations: Vec<upgraderail_simulator::SimulationScenario>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -88,6 +91,7 @@ impl Config {
                 "project.name: must not be empty".into(),
             ));
         }
+        validate_scenarios(&config.simulations)?;
         let base = path.parent().unwrap_or_else(|| Path::new("."));
         if config.analysis.current_wasm.is_relative() {
             config.analysis.current_wasm = base.join(&config.analysis.current_wasm);
@@ -97,6 +101,80 @@ impl Config {
         }
         Ok(config)
     }
+}
+
+fn is_base32_strkey(value: &str, prefix: char) -> bool {
+    value.len() == 56
+        && value.starts_with(prefix)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || matches!(byte, b'2'..=b'7'))
+}
+
+fn validate_scenarios(
+    scenarios: &[upgraderail_simulator::SimulationScenario],
+) -> Result<(), ManifestError> {
+    let mut names = std::collections::BTreeSet::new();
+    for scenario in scenarios {
+        if scenario.name.trim().is_empty() {
+            return Err(ManifestError::Config(
+                "simulation.name: must not be empty".into(),
+            ));
+        }
+        if !names.insert(&scenario.name) {
+            return Err(ManifestError::Config(format!(
+                "simulation.name: duplicate scenario `{}`",
+                scenario.name
+            )));
+        }
+        if !is_base32_strkey(&scenario.source_account, 'G') {
+            return Err(ManifestError::Config(format!(
+                "simulation.{}.source_account: invalid Stellar account",
+                scenario.name
+            )));
+        }
+        for (field, value) in [
+            ("current_contract", &scenario.current_contract),
+            ("candidate_contract", &scenario.candidate_contract),
+        ] {
+            if !is_base32_strkey(value, 'C') {
+                return Err(ManifestError::Config(format!(
+                    "simulation.{}.{field}: invalid Stellar contract ID",
+                    scenario.name
+                )));
+            }
+        }
+        if scenario.function.trim().is_empty() {
+            return Err(ManifestError::Config(format!(
+                "simulation.{}.function: must not be empty",
+                scenario.name
+            )));
+        }
+        let rpc_url = Url::parse(&scenario.network.rpc_url).map_err(|_| {
+            ManifestError::Config(format!(
+                "simulation.{}.network.rpc_url: invalid URL",
+                scenario.name
+            ))
+        })?;
+        if !matches!(rpc_url.scheme(), "http" | "https")
+            || !rpc_url.username().is_empty()
+            || rpc_url.password().is_some()
+            || rpc_url.query().is_some()
+        {
+            return Err(ManifestError::Config(format!(
+                "simulation.{}.network.rpc_url: use a credential-free http(s) endpoint",
+                scenario.name
+            )));
+        }
+        if scenario.network.name.trim().is_empty() || scenario.network.network_passphrase.is_empty()
+        {
+            return Err(ManifestError::Config(format!(
+                "simulation.{}.network: name and network_passphrase are required",
+                scenario.name
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -212,5 +290,43 @@ mod tests {
         assert!(verify_file(file.path(), &hash).unwrap());
         fs::write(file.path(), b"{} \n").unwrap();
         assert!(!verify_file(file.path(), &hash).unwrap());
+    }
+
+    #[test]
+    fn configuration_rejects_duplicate_or_invalid_scenarios() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            file.path(),
+            r#"schema_version = 1
+[project]
+name = "test"
+[analysis]
+protocol_profile = 28
+current_wasm = "a.wasm"
+candidate_wasm = "b.wasm"
+[[simulation]]
+name = "repeat"
+source_account = "GB6NGKUWJFXWAVE5K3UNLGTPTBGD3TDVOZAA3ITOBIMUR25SGMLGKRA6"
+current_contract = "CCMC4WGOCRU34RYO4YK64QVDNOMJBS27SBHH42ARQ7NOCQPZMRZMSLR3"
+candidate_contract = "CCMC4WGOCRU34RYO4YK64QVDNOMJBS27SBHH42ARQ7NOCQPZMRZMSLR3"
+function = "get"
+[simulation.network]
+name = "testnet"
+rpc_url = "https://example.test/rpc"
+network_passphrase = "test"
+[[simulation]]
+name = "repeat"
+source_account = "GB6NGKUWJFXWAVE5K3UNLGTPTBGD3TDVOZAA3ITOBIMUR25SGMLGKRA6"
+current_contract = "CCMC4WGOCRU34RYO4YK64QVDNOMJBS27SBHH42ARQ7NOCQPZMRZMSLR3"
+candidate_contract = "CCMC4WGOCRU34RYO4YK64QVDNOMJBS27SBHH42ARQ7NOCQPZMRZMSLR3"
+function = "get"
+[simulation.network]
+name = "testnet"
+rpc_url = "https://example.test/rpc"
+network_passphrase = "test"
+"#,
+        )
+        .unwrap();
+        assert!(Config::load(file.path()).is_err());
     }
 }
