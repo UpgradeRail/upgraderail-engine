@@ -25,7 +25,7 @@ upgraderail manifest hash release.json
 upgraderail manifest verify release.json HASH
 ```
 
-JSON is available from `inspect`, `compare`, and `check` with `--format json`. Comparison exits with code 1 when a blocking finding exists. Invalid input exits with code 2.
+JSON is available from `inspect`, `compare`, and `check` with `--format json`. Exit code 1 means blocking findings, 2 means input or configuration failure, 3 means a missing or incompatible local dependency, 4 means an RPC or network failure, and 5 means an unexpected engine failure.
 
 ## Real contracts integration
 
