@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{process::Stdio, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, process::Stdio, time::Duration};
 use tokio::{process::Command, time::timeout};
 use upgraderail_core::{Finding, Severity};
 use url::Url;
@@ -13,6 +13,8 @@ pub use scenario::{AuthorizationMode, ScenarioExpectations, ScenarioNetwork, Sim
 pub enum SimulationError {
     #[error("Stellar CLI is unavailable: {0}")]
     Cli(String),
+    #[error("Stellar CLI command failed: {0}")]
+    CliCommand(String),
     #[error("unsupported Stellar CLI version `{0}`; version 28.x is required")]
     CliVersion(String),
     #[error("RPC URL is invalid: {0}")]
@@ -25,6 +27,91 @@ pub enum SimulationError {
     Malformed(String),
     #[error("operation timed out")]
     Timeout,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractInvocation {
+    pub contract_id: String,
+    pub source_account: String,
+    pub rpc_url: String,
+    pub network_passphrase: String,
+    pub function: String,
+    pub args: BTreeMap<String, String>,
+    pub authorization_mode: AuthorizationMode,
+}
+
+#[derive(Clone, Debug)]
+pub struct StellarCli {
+    program: PathBuf,
+}
+
+impl Default for StellarCli {
+    fn default() -> Self {
+        Self {
+            program: PathBuf::from("stellar"),
+        }
+    }
+}
+
+impl StellarCli {
+    #[must_use]
+    pub fn with_program(program: impl Into<PathBuf>) -> Self {
+        Self {
+            program: program.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn build_args(invocation: &ContractInvocation) -> Vec<String> {
+        let mut args = vec![
+            "contract".into(),
+            "invoke".into(),
+            "--build-only".into(),
+            "--send".into(),
+            "no".into(),
+            "--contract-id".into(),
+            invocation.contract_id.clone(),
+            "--source-account".into(),
+            invocation.source_account.clone(),
+            "--rpc-url".into(),
+            invocation.rpc_url.clone(),
+            "--network-passphrase".into(),
+            invocation.network_passphrase.clone(),
+            "--auth-mode".into(),
+            invocation.authorization_mode.stellar_cli_value().into(),
+            "--".into(),
+            invocation.function.clone(),
+        ];
+        for (name, value) in &invocation.args {
+            args.push(format!("--{name}"));
+            args.push(value.clone());
+        }
+        args
+    }
+
+    pub async fn build_transaction(
+        &self,
+        invocation: &ContractInvocation,
+    ) -> Result<String, SimulationError> {
+        let output = Command::new(&self.program)
+            .args(Self::build_args(invocation))
+            .stdin(Stdio::null())
+            .output()
+            .await
+            .map_err(|error| SimulationError::Cli(error.to_string()))?;
+        if !output.status.success() {
+            return Err(SimulationError::CliCommand(
+                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            ));
+        }
+        let transaction_xdr = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if transaction_xdr.is_empty() {
+            return Err(SimulationError::CliCommand(
+                "command returned empty transaction XDR".into(),
+            ));
+        }
+        Ok(transaction_xdr)
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -272,5 +359,54 @@ mod tests {
         .unwrap();
         let output = client.sanitized_endpoint();
         assert!(!output.contains("pass") && !output.contains("secret"));
+    }
+
+    fn invocation() -> ContractInvocation {
+        ContractInvocation {
+            contract_id: "CANDIDATE".into(),
+            source_account: "GSOURCE".into(),
+            rpc_url: "https://rpc.test".into(),
+            network_passphrase: "network".into(),
+            function: "set_value".into(),
+            args: BTreeMap::from([("value".into(), "7".into())]),
+            authorization_mode: AuthorizationMode::Record,
+        }
+    }
+
+    #[test]
+    fn transaction_builder_uses_individual_supported_cli_arguments() {
+        assert_eq!(
+            StellarCli::build_args(&invocation()),
+            vec![
+                "contract",
+                "invoke",
+                "--build-only",
+                "--send",
+                "no",
+                "--contract-id",
+                "CANDIDATE",
+                "--source-account",
+                "GSOURCE",
+                "--rpc-url",
+                "https://rpc.test",
+                "--network-passphrase",
+                "network",
+                "--auth-mode",
+                "root",
+                "--",
+                "set_value",
+                "--value",
+                "7",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn transaction_builder_surfaces_failed_command_stderr() {
+        let cli = StellarCli::with_program("/bin/false");
+        assert!(matches!(
+            cli.build_transaction(&invocation()).await,
+            Err(SimulationError::CliCommand(_))
+        ));
     }
 }
