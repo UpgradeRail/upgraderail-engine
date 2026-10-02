@@ -20,5 +20,18 @@ if cargo run --locked -q -p upgraderail-cli -- compare --current "$wasm_dir/flee
   echo "breaking fixture unexpectedly passed" >&2
   exit 1
 fi
-cargo run --locked -q -p upgraderail-cli -- compare --current "$wasm_dir/fleet_v1.wasm" --candidate "$wasm_dir/fleet_v2_migration.wasm" | grep -q 'Storage compatibility: NOT PROVEN BY STATIC ANALYSIS'
 
+migration_output="$(mktemp)"
+trap 'rm -f "$migration_output"' EXIT
+if cargo run --locked -q -p upgraderail-cli -- compare --current "$wasm_dir/fleet_v1.wasm" --candidate "$wasm_dir/fleet_v2_migration.wasm" >"$migration_output"; then
+  echo "migration fixture unexpectedly passed" >&2
+  cat "$migration_output" >&2
+  exit 1
+else
+  migration_status=$?
+  if [[ "$migration_status" -ne 1 ]]; then
+    cat "$migration_output" >&2
+    exit "$migration_status"
+  fi
+fi
+grep -Fq 'Storage compatibility: NOT PROVEN BY STATIC ANALYSIS' "$migration_output"
