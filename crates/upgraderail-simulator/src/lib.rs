@@ -190,6 +190,100 @@ pub struct ResourceThresholds {
     pub maximum_resource_fee_increase_bps: Option<u64>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioComparison {
+    pub current: SimulationEvidence,
+    pub candidate: SimulationEvidence,
+    pub findings: Vec<Finding>,
+}
+
+pub async fn run_scenario(
+    cli: &StellarCli,
+    scenario: &SimulationScenario,
+    thresholds: &ResourceThresholds,
+) -> Result<ScenarioComparison, SimulationError> {
+    let rpc = RpcClient::new(&scenario.network.rpc_url, Duration::from_secs(30))?;
+    let build = |contract_id: &str| ContractInvocation {
+        contract_id: contract_id.into(),
+        source_account: scenario.source_account.clone(),
+        rpc_url: scenario.network.rpc_url.clone(),
+        network_passphrase: scenario.network.network_passphrase.clone(),
+        function: scenario.function.clone(),
+        args: scenario.args.clone(),
+        authorization_mode: scenario.authorization_mode,
+    };
+    let current_transaction = cli
+        .build_transaction(&build(&scenario.current_contract))
+        .await?;
+    let current_response = rpc
+        .simulate_transaction(
+            &current_transaction,
+            scenario.authorization_mode.rpc_value(),
+        )
+        .await?;
+    let current = decode_simulation_evidence(
+        &scenario.name,
+        &scenario.network.name,
+        &scenario.current_contract,
+        &current_response,
+    )?;
+    let candidate_transaction = cli
+        .build_transaction(&build(&scenario.candidate_contract))
+        .await?;
+    let candidate_response = rpc
+        .simulate_transaction(
+            &candidate_transaction,
+            scenario.authorization_mode.rpc_value(),
+        )
+        .await?;
+    let candidate = decode_simulation_evidence(
+        &scenario.name,
+        &scenario.network.name,
+        &scenario.candidate_contract,
+        &candidate_response,
+    )?;
+    let findings = compare_scenario_evidence(scenario, &current, &candidate, thresholds);
+    Ok(ScenarioComparison {
+        current,
+        candidate,
+        findings,
+    })
+}
+
+pub fn compare_scenario_evidence(
+    scenario: &SimulationScenario,
+    current: &SimulationEvidence,
+    candidate: &SimulationEvidence,
+    thresholds: &ResourceThresholds,
+) -> Vec<Finding> {
+    let mut findings =
+        compare_authorization(&current.authorization_xdr, &candidate.authorization_xdr);
+    findings.extend(compare_resources(
+        &current.resources,
+        &candidate.resources,
+        thresholds,
+    ));
+    if scenario.expectations.return_match && current.return_value_xdr != candidate.return_value_xdr
+    {
+        findings.push(Finding::new(
+            "SIM002",
+            Severity::Warning,
+            "Runtime return value changed",
+            "Current and candidate scenarios returned different XDR values.",
+        ));
+    }
+    if !current.success || !candidate.success {
+        findings.push(Finding::new(
+            "SIM003",
+            Severity::Warning,
+            "Simulation failed",
+            "At least one current or candidate simulation returned a diagnostic failure.",
+        ));
+    }
+    findings.sort_by(|left, right| (&left.code, &left.message).cmp(&(&right.code, &right.message)));
+    findings
+}
+
 pub fn compare_authorization(current: &[String], candidate: &[String]) -> Vec<Finding> {
     if current == candidate {
         return Vec::new();
@@ -529,6 +623,54 @@ mod tests {
             decode_simulation_evidence("scenario", "testnet", "C123", &json!({})),
             Err(SimulationError::Malformed(_))
         ));
+    }
+
+    #[test]
+    fn scenario_evidence_compares_return_values_and_failures() {
+        let scenario = SimulationScenario {
+            name: "test".into(),
+            network: ScenarioNetwork {
+                name: "testnet".into(),
+                rpc_url: "https://rpc.test".into(),
+                network_passphrase: "test".into(),
+            },
+            source_account: "G".into(),
+            current_contract: "C1".into(),
+            candidate_contract: "C2".into(),
+            function: "get".into(),
+            args: BTreeMap::new(),
+            authorization_mode: AuthorizationMode::Record,
+            expectations: ScenarioExpectations {
+                return_match: true,
+                authorization_match: true,
+            },
+        };
+        let current = SimulationEvidence {
+            scenario: "test".into(),
+            network: "testnet".into(),
+            target: "C1".into(),
+            latest_ledger: None,
+            return_value_xdr: Some("A".into()),
+            authorization_xdr: vec![],
+            resources: ResourceUsage::default(),
+            diagnostic_failure: None,
+            success: true,
+        };
+        let candidate = SimulationEvidence {
+            target: "C2".into(),
+            return_value_xdr: Some("B".into()),
+            diagnostic_failure: Some("failure".into()),
+            success: false,
+            ..current.clone()
+        };
+        let findings = compare_scenario_evidence(
+            &scenario,
+            &current,
+            &candidate,
+            &ResourceThresholds::default(),
+        );
+        assert!(findings.iter().any(|finding| finding.code == "SIM002"));
+        assert!(findings.iter().any(|finding| finding.code == "SIM003"));
     }
 
     #[tokio::test]
