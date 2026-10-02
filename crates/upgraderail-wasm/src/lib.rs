@@ -1,8 +1,13 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use soroban_spec::read;
 use std::{
+    fs,
     path::{Path, PathBuf},
 };
+use stellar_xdr::ScSpecEntry;
 use upgraderail_core::ProtocolProfile;
+use wasmparser::{Parser, Payload, Validator};
 
 pub const MAX_WASM_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -51,4 +56,72 @@ pub struct ArtifactInspection {
     pub custom_sections: Vec<String>,
     pub protocol_profile: ProtocolProfile,
     pub tool_version: String,
+}
+
+type NormalizedSpec = (
+    Vec<FunctionSpec>,
+    Vec<NamedSpec>,
+    Vec<NamedSpec>,
+    Vec<NamedSpec>,
+);
+
+fn xdr_name<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.get("name").cloned())
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "<unnamed>".into())
+}
+
+fn normalize(entries: Vec<ScSpecEntry>) -> Result<NormalizedSpec, InspectError> {
+    let mut functions = Vec::new();
+    let mut types = Vec::new();
+    let mut errors = Vec::new();
+    let mut events = Vec::new();
+    for entry in entries {
+        match entry {
+            ScSpecEntry::FunctionV0(v) => {
+                let value =
+                    serde_json::to_value(&v).map_err(|e| InspectError::Spec(e.to_string()))?;
+                functions.push(FunctionSpec {
+                    name: xdr_name(&v),
+                    inputs: value
+                        .get("inputs")
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default(),
+                    outputs: value
+                        .get("outputs")
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default(),
+                });
+            }
+            ScSpecEntry::UdtErrorEnumV0(v) => errors.push(NamedSpec {
+                name: xdr_name(&v),
+                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
+            }),
+            ScSpecEntry::EventV0(v) => events.push(NamedSpec {
+                name: xdr_name(&v),
+                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
+            }),
+            ScSpecEntry::UdtStructV0(v) => types.push(NamedSpec {
+                name: xdr_name(&v),
+                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
+            }),
+            ScSpecEntry::UdtUnionV0(v) => types.push(NamedSpec {
+                name: xdr_name(&v),
+                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
+            }),
+            ScSpecEntry::UdtEnumV0(v) => types.push(NamedSpec {
+                name: xdr_name(&v),
+                value: serde_json::to_value(v).map_err(|e| InspectError::Spec(e.to_string()))?,
+            }),
+        }
+    }
+    functions.sort_by(|a, b| a.name.cmp(&b.name));
+    types.sort_by(|a, b| a.name.cmp(&b.name));
+    errors.sort_by(|a, b| a.name.cmp(&b.name));
+    events.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok((functions, types, errors, events))
 }
