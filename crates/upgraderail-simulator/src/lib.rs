@@ -683,6 +683,32 @@ mod tests {
     }
 
     #[test]
+    fn rpc_client_rejects_invalid_or_credential_bearing_urls() {
+        assert!(matches!(
+            RpcClient::new("file:///tmp/rpc", Duration::from_secs(1)),
+            Err(SimulationError::Url(_))
+        ));
+        let client = RpcClient::new(
+            "https://user:secret@example.test/rpc?token=secret",
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert!(!client.sanitized_endpoint().contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn simulation_timeout_is_classified() {
+        assert!(matches!(
+            run_with_timeout(Duration::from_millis(1), async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Ok::<(), SimulationError>(())
+            })
+            .await,
+            Err(SimulationError::Timeout)
+        ));
+    }
+
+    #[test]
     fn scenario_evidence_compares_return_values_and_failures() {
         let scenario = SimulationScenario {
             name: "test".into(),

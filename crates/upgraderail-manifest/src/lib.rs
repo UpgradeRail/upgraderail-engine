@@ -340,4 +340,23 @@ network_passphrase = "test"
         .unwrap();
         assert!(Config::load(file.path()).is_err());
     }
+
+    #[test]
+    fn configuration_rejects_unknown_fields_and_unsupported_schema() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            file.path(),
+            r#"schema_version = 2
+unexpected = true
+[project]
+name = "test"
+[analysis]
+protocol_profile = 28
+current_wasm = "a.wasm"
+candidate_wasm = "b.wasm"
+"#,
+        )
+        .unwrap();
+        assert!(Config::load(file.path()).is_err());
+    }
 }
