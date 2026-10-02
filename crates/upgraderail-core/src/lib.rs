@@ -84,3 +84,21 @@ impl fmt::Display for ProtocolProfile {
         write!(f, "28")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_is_derived_from_findings() {
+        assert_eq!(UpgradeStatus::from_findings(&[]), UpgradeStatus::Ready);
+        assert_eq!(
+            UpgradeStatus::from_findings(&[Finding::new("X", Severity::Warning, "x", "x")]),
+            UpgradeStatus::ReadyWithWarnings
+        );
+        assert_eq!(
+            UpgradeStatus::from_findings(&[Finding::new("X", Severity::Blocking, "x", "x")]),
+            UpgradeStatus::Blocked
+        );
+    }
+}
