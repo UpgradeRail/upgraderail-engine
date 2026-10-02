@@ -9,6 +9,7 @@ license.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+stellar-xdr.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 url.workspace = true
@@ -16,4 +17,3 @@ upgraderail-core = { path = "../upgraderail-core" }
 
 [lints]
 workspace = true
-

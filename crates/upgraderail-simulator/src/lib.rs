@@ -5,8 +5,12 @@ use tokio::{process::Command, time::timeout};
 use upgraderail_core::{Finding, Severity};
 use url::Url;
 
+mod auth;
 mod scenario;
 
+pub use auth::{
+    normalize_authorization, AuthorizationEvidence, NormalizedAuthorization, NormalizedInvocation,
+};
 pub use scenario::{AuthorizationMode, ScenarioExpectations, ScenarioNetwork, SimulationScenario};
 
 #[derive(Debug, thiserror::Error)]
@@ -122,14 +126,14 @@ pub struct ResourceUsage {
     pub resource_fee: Option<u64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SimulationEvidence {
     pub scenario: String,
     pub network: String,
     pub latest_ledger: Option<u64>,
     pub target: String,
     pub return_value_xdr: Option<String>,
-    pub authorization_xdr: Vec<String>,
+    pub authorization: Vec<AuthorizationEvidence>,
     pub resources: ResourceUsage,
     pub diagnostic_failure: Option<String>,
     pub success: bool,
@@ -152,13 +156,14 @@ pub fn decode_simulation_evidence(
         .ok_or_else(|| {
             SimulationError::Malformed("simulateTransaction response has no results".into())
         })?;
-    let authorization_xdr = result
+    let authorization = result
         .get("auth")
         .and_then(Value::as_array)
         .map(|values| {
             values
                 .iter()
-                .filter_map(|value| value.as_str().map(str::to_owned))
+                .filter_map(Value::as_str)
+                .map(auth::normalize_authorization)
                 .collect()
         })
         .unwrap_or_default();
@@ -170,7 +175,7 @@ pub fn decode_simulation_evidence(
         target: target.into(),
         latest_ledger: parse_u64(response.get("latestLedger")),
         return_value_xdr: result.get("xdr").and_then(Value::as_str).map(str::to_owned),
-        authorization_xdr,
+        authorization,
         resources: ResourceUsage {
             instructions: parse_u64(cost.and_then(|cost| cost.get("cpuInsns"))),
             read_bytes: parse_u64(cost.and_then(|cost| cost.get("readBytes"))),
@@ -190,7 +195,7 @@ pub struct ResourceThresholds {
     pub maximum_resource_fee_increase_bps: Option<u64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioComparison {
     pub current: SimulationEvidence,
     pub candidate: SimulationEvidence,
@@ -256,8 +261,7 @@ pub fn compare_scenario_evidence(
     candidate: &SimulationEvidence,
     thresholds: &ResourceThresholds,
 ) -> Vec<Finding> {
-    let mut findings =
-        compare_authorization(&current.authorization_xdr, &candidate.authorization_xdr);
+    let mut findings = compare_authorization(&current.authorization, &candidate.authorization);
     findings.extend(compare_resources(
         &current.resources,
         &candidate.resources,
@@ -284,16 +288,43 @@ pub fn compare_scenario_evidence(
     findings
 }
 
-pub fn compare_authorization(current: &[String], candidate: &[String]) -> Vec<Finding> {
-    if current == candidate {
-        return Vec::new();
+pub fn compare_authorization(
+    current: &[AuthorizationEvidence],
+    candidate: &[AuthorizationEvidence],
+) -> Vec<Finding> {
+    let has_unnormalized = current
+        .iter()
+        .chain(candidate)
+        .any(|entry| entry.normalized.is_none());
+    let comparable = current
+        .iter()
+        .map(authorization_comparison_key)
+        .eq(candidate.iter().map(authorization_comparison_key));
+    let mut findings = Vec::new();
+    if !comparable {
+        findings.push(Finding::new(
+            "AUTH001",
+            Severity::Warning,
+            "Runtime authorization changed",
+            "Authorization credential identity, invocation tree, contract target, function, or arguments differ between simulations.",
+        ));
     }
-    vec![Finding::new(
-        "AUTH001",
-        Severity::Warning,
-        "Runtime authorization changed",
-        "The normalized authorization entries differ between current and candidate simulations.",
-    )]
+    if has_unnormalized {
+        findings.push(Finding::new(
+            "AUTH002",
+            Severity::Warning,
+            "Authorization evidence was not normalized",
+            "At least one authorization entry could not be decoded as Protocol 28 XDR; raw XDR is retained for review.",
+        ));
+    }
+    findings
+}
+
+fn authorization_comparison_key(entry: &AuthorizationEvidence) -> String {
+    entry.normalized.as_ref().map_or_else(
+        || format!("raw:{}", entry.raw_xdr),
+        |normalized| serde_json::to_string(normalized).unwrap_or_else(|_| entry.raw_xdr.clone()),
+    )
 }
 
 fn exceeds(current: Option<u64>, candidate: Option<u64>, bps: Option<u64>) -> bool {
@@ -470,8 +501,33 @@ mod tests {
     use super::*;
     #[test]
     fn authorization_difference_is_visible() {
+        let current = normalize_authorization("a");
+        let candidate = normalize_authorization("b");
         assert_eq!(
-            compare_authorization(&["a".into()], &["b".into()])[0].code,
+            compare_authorization(&[current], &[candidate])[0].code,
+            "AUTH001"
+        );
+    }
+
+    #[test]
+    fn normalized_authorization_preserves_meaningful_invocation_changes() {
+        let mut candidate = normalize_authorization("a");
+        candidate.normalized = Some(NormalizedAuthorization {
+            credential_form: "source_account".into(),
+            authorizing_identity: Value::Null,
+            invocation: NormalizedInvocation {
+                function_kind: "contract_fn".into(),
+                contract: Some(json!("CANDIDATE")),
+                function: Some("set_value".into()),
+                arguments: vec![json!(7)],
+                details: None,
+                sub_invocations: vec![],
+            },
+        });
+        let mut current = candidate.clone();
+        current.normalized.as_mut().unwrap().invocation.function = Some("get_value".into());
+        assert_eq!(
+            compare_authorization(&[current], &[candidate])[0].code,
             "AUTH001"
         );
     }
@@ -612,7 +668,8 @@ mod tests {
             decode_simulation_evidence("scenario", "testnet", "C123", &response).unwrap();
         assert_eq!(evidence.latest_ledger, Some(42));
         assert_eq!(evidence.return_value_xdr.as_deref(), Some("AAAA"));
-        assert_eq!(evidence.authorization_xdr, ["AUTH"]);
+        assert_eq!(evidence.authorization[0].raw_xdr, "AUTH");
+        assert!(evidence.authorization[0].normalized.is_none());
         assert_eq!(evidence.resources.resource_fee, Some(17));
         assert!(evidence.success);
     }
@@ -651,7 +708,7 @@ mod tests {
             target: "C1".into(),
             latest_ledger: None,
             return_value_xdr: Some("A".into()),
-            authorization_xdr: vec![],
+            authorization: vec![],
             resources: ResourceUsage::default(),
             diagnostic_failure: None,
             success: true,
